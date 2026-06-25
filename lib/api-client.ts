@@ -212,6 +212,38 @@ class ApiClient {
     });
   }
 
+  async agentReadFile(projectId: number, agentId: number, path: string) {
+    return this.client.post(`/agents/projects/${projectId}/agent/${agentId}/read_file/`, { path });
+  }
+
+  async agentSearchWorkspace(projectId: number, agentId: number, query: string, limit = 20) {
+    return this.client.post(`/agents/projects/${projectId}/agent/${agentId}/search_workspace/`, {
+      query,
+      limit,
+    });
+  }
+
+  async agentProposeEdit(
+    projectId: number,
+    agentId: number,
+    data: { path: string; instructions?: string; proposed_content?: string }
+  ) {
+    return this.client.post(`/agents/projects/${projectId}/agent/${agentId}/propose_edit/`, data);
+  }
+
+  async agentApplyEdit(
+    projectId: number,
+    agentId: number,
+    data: {
+      path: string;
+      proposed_content: string;
+      expected_original_content?: string;
+      change_description?: string;
+    }
+  ) {
+    return this.client.post(`/agents/projects/${projectId}/agent/${agentId}/apply_edit/`, data);
+  }
+
   // Tasks endpoints
   async getTasks(projectId: number) {
     return this.client.get(`/tasks/projects/${projectId}/tasks/`);

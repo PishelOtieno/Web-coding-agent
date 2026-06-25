@@ -31,6 +31,20 @@ interface Conversation {
   messages?: Message[];
 }
 
+interface Agent {
+  id: number;
+  name: string;
+  model_name: string;
+}
+
+interface ProposedEdit {
+  path: string;
+  original_content: string;
+  proposed_content: string;
+  diff: string;
+  task_id: number;
+}
+
 function WorkspaceContent() {
   const params = useParams();
   const projectId = Number(params.projectId);
@@ -47,11 +61,17 @@ function WorkspaceContent() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [editInstructions, setEditInstructions] = useState('');
+  const [proposedEdit, setProposedEdit] = useState<ProposedEdit | null>(null);
+  const [isProposingEdit, setIsProposingEdit] = useState(false);
+  const [isApplyingEdit, setIsApplyingEdit] = useState(false);
 
   useEffect(() => {
     fetchProject(projectId);
     loadFiles();
     loadConversations();
+    loadAgent();
   }, [projectId]);
 
   const loadFiles = async () => {
@@ -86,6 +106,27 @@ function WorkspaceContent() {
     } catch (error) {
       console.error('Failed to load conversations:', error);
       setChatError('Failed to load assistant conversation.');
+    }
+  };
+
+  const loadAgent = async () => {
+    try {
+      const response = await apiClient.getAgent(projectId);
+      const agents = response.data?.results || response.data || [];
+      if (agents.length > 0) {
+        setAgent(agents[0]);
+        return;
+      }
+
+      const created = await apiClient.createAgent(projectId, {
+        name: 'AI Assistant',
+        model_name: 'gpt-4',
+        system_prompt: 'You are an expert coding assistant.',
+      });
+      setAgent(created.data);
+    } catch (error) {
+      console.error('Failed to load agent:', error);
+      setChatError('Failed to load coding agent.');
     }
   };
 
@@ -158,6 +199,52 @@ function WorkspaceContent() {
       setMessages((prev) => prev.slice(0, -1));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleProposeEdit = async () => {
+    if (!agent || !selectedFile || !editInstructions.trim()) return;
+
+    setIsProposingEdit(true);
+    setChatError(null);
+    try {
+      const response = await apiClient.agentProposeEdit(projectId, agent.id, {
+        path: selectedFile.path,
+        instructions: editInstructions,
+      });
+      setProposedEdit(response.data);
+    } catch (error: any) {
+      console.error('Failed to propose edit:', error);
+      setChatError(error.response?.data?.error || 'Failed to propose edit.');
+    } finally {
+      setIsProposingEdit(false);
+    }
+  };
+
+  const handleApplyEdit = async () => {
+    if (!agent || !proposedEdit) return;
+
+    setIsApplyingEdit(true);
+    setChatError(null);
+    try {
+      const response = await apiClient.agentApplyEdit(projectId, agent.id, {
+        path: proposedEdit.path,
+        proposed_content: proposedEdit.proposed_content,
+        expected_original_content: proposedEdit.original_content,
+        change_description: editInstructions || 'Agent edit applied',
+      });
+      setSelectedFile(response.data);
+      setFiles((currentFiles) =>
+        currentFiles.map((file) => (file.path === response.data.path ? { ...file, ...response.data } : file))
+      );
+      setProposedEdit(null);
+      setEditInstructions('');
+      setIsDirty(false);
+    } catch (error: any) {
+      console.error('Failed to apply edit:', error);
+      setChatError(error.response?.data?.error || 'Failed to apply edit.');
+    } finally {
+      setIsApplyingEdit(false);
     }
   };
 
@@ -268,12 +355,64 @@ function WorkspaceContent() {
         <div className="w-80 border-l border-border bg-card/50 flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="font-semibold text-foreground text-sm">AI Assistant</h2>
+            {agent && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {agent.name} · {agent.model_name}
+              </p>
+            )}
           </div>
           {chatError && (
             <div className="px-4 py-3 bg-destructive/10 text-destructive text-xs border-b border-destructive/20">
               {chatError}
             </div>
           )}
+
+          <div className="border-b border-border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground">Draft Edit</h3>
+              <span className="text-xs text-muted-foreground">
+                {selectedFile?.path || 'No file selected'}
+              </span>
+            </div>
+            <textarea
+              value={editInstructions}
+              onChange={(event) => setEditInstructions(event.target.value)}
+              placeholder="Describe the change for the open file..."
+              rows={3}
+              disabled={!agent || !selectedFile || isProposingEdit}
+              className="w-full resize-none px-3 py-2 bg-background border border-border rounded text-sm text-foreground placeholder-muted-foreground focus:ring-2 focus:ring-primary disabled:opacity-50"
+            />
+            <button
+              onClick={handleProposeEdit}
+              disabled={!agent || !selectedFile || !editInstructions.trim() || isProposingEdit}
+              className="w-full px-3 py-2 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded text-sm transition"
+            >
+              {isProposingEdit ? 'Drafting...' : 'Propose Diff'}
+            </button>
+            {proposedEdit && (
+              <div className="space-y-3">
+                <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-3 text-xs text-foreground">
+                  {proposedEdit.diff || 'No changes proposed.'}
+                </pre>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleApplyEdit}
+                    disabled={isApplyingEdit}
+                    className="flex-1 px-3 py-2 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded text-sm transition"
+                  >
+                    {isApplyingEdit ? 'Applying...' : 'Apply'}
+                  </button>
+                  <button
+                    onClick={() => setProposedEdit(null)}
+                    disabled={isApplyingEdit}
+                    className="px-3 py-2 border border-border hover:bg-muted disabled:opacity-50 text-foreground rounded text-sm transition"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
