@@ -2,8 +2,7 @@
 import os
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
-import json
-import openai
+from openai import OpenAI
 
 
 class BaseLLMProvider(ABC):
@@ -31,26 +30,26 @@ class OpenAIProvider(BaseLLMProvider):
     def __init__(self, api_key: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
         self.api_key = api_key or os.environ.get('OPENAI_API_KEY')
-        openai.api_key = self.api_key
+        self.client = OpenAI(api_key=self.api_key)
 
     def generate(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """Generate response from OpenAI."""
         try:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 **kwargs
             )
-            return response.choices[0].message.content
+            return response.choices[0].message.content or ''
         except Exception as e:
             raise Exception(f"OpenAI API error: {str(e)}")
 
     def stream(self, messages: List[Dict[str, str]], **kwargs):
         """Stream response from OpenAI."""
         try:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
@@ -59,10 +58,10 @@ class OpenAIProvider(BaseLLMProvider):
                 **kwargs
             )
             for chunk in response:
-                if 'choices' in chunk and len(chunk['choices']) > 0:
-                    delta = chunk['choices'][0].get('delta', {})
-                    if 'content' in delta:
-                        yield delta['content']
+                if chunk.choices:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        yield content
         except Exception as e:
             raise Exception(f"OpenAI streaming error: {str(e)}")
 

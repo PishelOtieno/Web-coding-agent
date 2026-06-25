@@ -3,6 +3,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.db import models
 from django_filters.rest_framework import DjangoFilterBackend
 from .models import Project, ProjectCollaborator
 from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectCollaboratorSerializer
@@ -31,6 +32,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+    def get_permissions(self):
+        if self.action in ['add_collaborator', 'remove_collaborator']:
+            return [IsAuthenticated(), IsProjectOwner()]
+        return [permission() for permission in self.permission_classes]
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def add_collaborator(self, request, pk=None):

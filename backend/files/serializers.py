@@ -20,7 +20,7 @@ class FileSerializer(serializers.ModelSerializer):
         model = File
         fields = ['id', 'project', 'name', 'path', 'file_type', 'language', 'size', 'is_directory', 
                  'parent', 'created_by', 'created_by_username', 'latest_version', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'project', 'created_by', 'created_at', 'updated_at']
 
     def get_latest_version(self, obj):
         version = obj.versions.first()
@@ -37,4 +37,4 @@ class FileDetailSerializer(serializers.ModelSerializer):
         model = File
         fields = ['id', 'project', 'name', 'path', 'file_type', 'language', 'content', 'size', 
                  'is_directory', 'parent', 'created_by', 'created_by_username', 'versions', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'project', 'created_by', 'created_at', 'updated_at']
