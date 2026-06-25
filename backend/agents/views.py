@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
+from django.conf import settings
 from projects.models import Project
 from .models import Agent, AgentCapability
 from .serializers import AgentSerializer, AgentDetailSerializer
@@ -17,9 +18,16 @@ class AgentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        project_id = self.kwargs.get('project_id')
-        project = get_object_or_404(Project, id=project_id)
+        project = self.get_project()
         return Agent.objects.filter(project=project)
+
+    def get_project(self):
+        project = get_object_or_404(Project, id=self.kwargs.get('project_id'))
+        user = self.request.user
+        if project.owner == user or project.collaborators.filter(user=user).exists():
+            return project
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied('You do not have access to this project.')
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -27,8 +35,7 @@ class AgentViewSet(viewsets.ModelViewSet):
         return AgentSerializer
 
     def perform_create(self, serializer):
-        project_id = self.kwargs.get('project_id')
-        project = get_object_or_404(Project, id=project_id)
+        project = self.get_project()
         agent = serializer.save(project=project)
         
         # Initialize default capabilities
@@ -48,10 +55,12 @@ class AgentViewSet(viewsets.ModelViewSet):
         """Generate code using the agent."""
         agent = self.get_object()
         prompt = request.data.get('prompt', '')
+        if not prompt:
+            return Response({'prompt': ['This field is required.']}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             llm = LLMFactory.create(
-                provider=agent.model_name.split('-')[0].lower() if '-' in agent.model_name else 'openai',
+                provider=getattr(settings, 'LLM_PROVIDER', 'openai'),
                 model=agent.model_name,
                 temperature=agent.temperature,
                 max_tokens=agent.max_tokens
@@ -80,11 +89,13 @@ class AgentViewSet(viewsets.ModelViewSet):
         """Stream code generation from the agent."""
         agent = self.get_object()
         prompt = request.data.get('prompt', '')
+        if not prompt:
+            return Response({'prompt': ['This field is required.']}, status=status.HTTP_400_BAD_REQUEST)
         
         def event_stream():
             try:
                 llm = LLMFactory.create(
-                    provider='openai',
+                    provider=getattr(settings, 'LLM_PROVIDER', 'openai'),
                     model=agent.model_name,
                     temperature=agent.temperature,
                     max_tokens=agent.max_tokens

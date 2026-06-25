@@ -15,7 +15,7 @@ interface File {
   id: number;
   name: string;
   path: string;
-  content: string;
+  content?: string;
   language?: string;
 }
 
@@ -25,6 +25,12 @@ interface Message {
   content: string;
 }
 
+interface Conversation {
+  id: number;
+  title: string;
+  messages?: Message[];
+}
+
 function WorkspaceContent() {
   const params = useParams();
   const projectId = Number(params.projectId);
@@ -32,10 +38,14 @@ function WorkspaceContent() {
   
   const [files, setFiles] = useState<File[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [conversations, setConversations] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isSavingFile, setIsSavingFile] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
 
   useEffect(() => {
@@ -46,22 +56,73 @@ function WorkspaceContent() {
 
   const loadFiles = async () => {
     try {
+      setFileError(null);
       const response = await apiClient.getFileTree(projectId);
-      setFiles(response.data || []);
-      if (response.data && response.data.length > 0) {
-        setSelectedFile(response.data[0]);
+      const nextFiles = response.data || [];
+      setFiles(nextFiles);
+      if (nextFiles.length > 0) {
+        await selectFile(nextFiles[0]);
       }
     } catch (error) {
       console.error('Failed to load files:', error);
+      setFileError('Failed to load files.');
     }
   };
 
   const loadConversations = async () => {
     try {
+      setChatError(null);
       const response = await apiClient.getConversations(projectId);
-      setConversations(response.data?.results || response.data || []);
+      let nextConversations = response.data?.results || response.data || [];
+      if (nextConversations.length === 0) {
+        const created = await apiClient.createConversation(projectId, {
+          title: 'Project Assistant',
+          description: 'Default project support conversation',
+        });
+        nextConversations = [created.data];
+      }
+      setConversations(nextConversations);
+      setMessages(nextConversations[0]?.messages || []);
     } catch (error) {
       console.error('Failed to load conversations:', error);
+      setChatError('Failed to load assistant conversation.');
+    }
+  };
+
+  const selectFile = async (file: File) => {
+    try {
+      setFileError(null);
+      const response = await apiClient.getFile(projectId, file.id);
+      setSelectedFile(response.data);
+      setIsDirty(false);
+    } catch (error) {
+      console.error('Failed to load file:', error);
+      setFileError('Failed to load file content.');
+    }
+  };
+
+  const handleSaveFile = async () => {
+    if (!selectedFile) return;
+
+    setIsSavingFile(true);
+    setFileError(null);
+    try {
+      const content = selectedFile.content || '';
+      const response = await apiClient.updateFile(projectId, selectedFile.id, {
+        ...selectedFile,
+        content,
+        size: new Blob([content]).size,
+      });
+      setSelectedFile(response.data);
+      setFiles((currentFiles) =>
+        currentFiles.map((file) => (file.id === response.data.id ? { ...file, ...response.data } : file))
+      );
+      setIsDirty(false);
+    } catch (error) {
+      console.error('Failed to save file:', error);
+      setFileError('Failed to save file.');
+    } finally {
+      setIsSavingFile(false);
     }
   };
 
@@ -76,18 +137,25 @@ function WorkspaceContent() {
     setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
     setIsLoading(true);
+    setChatError(null);
 
     try {
-      await apiClient.sendMessage(projectId, conversations[0].id, inputMessage);
-      
-      // Simulate AI response
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: 'I understand you want to ' + inputMessage.toLowerCase() + '. I can help you with that.',
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+      const response = await apiClient.sendMessage(projectId, conversations[0].id, inputMessage);
+      setMessages((prev) => {
+        const withoutOptimistic = prev.slice(0, -1);
+        const nextMessages = [...withoutOptimistic, response.data.user_message];
+        if (response.data.assistant_message) {
+          nextMessages.push(response.data.assistant_message);
+        }
+        return nextMessages;
+      });
+      if (response.data.assistant_error) {
+        setChatError(response.data.assistant_error);
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
+      setChatError('Failed to send message.');
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
       setIsLoading(false);
     }
@@ -131,7 +199,7 @@ function WorkspaceContent() {
               files.map((file) => (
                 <button
                   key={file.id}
-                  onClick={() => setSelectedFile(file)}
+                  onClick={() => selectFile(file)}
                   className={`w-full text-left px-3 py-2 rounded text-sm transition ${
                     selectedFile?.id === file.id
                       ? 'bg-primary/20 text-primary'
@@ -151,13 +219,28 @@ function WorkspaceContent() {
             <>
               <div className="px-4 py-2 border-b border-border bg-card/50 text-sm text-muted-foreground flex items-center justify-between">
                 <span>{selectedFile.path}</span>
-                <span className="text-xs bg-muted px-2 py-1 rounded">{selectedFile.language || getLanguageFromFile(selectedFile.name)}</span>
+                <div className="flex items-center gap-3">
+                  {isDirty && <span className="text-xs text-primary">Unsaved changes</span>}
+                  <span className="text-xs bg-muted px-2 py-1 rounded">{selectedFile.language || getLanguageFromFile(selectedFile.name)}</span>
+                  <button
+                    onClick={handleSaveFile}
+                    disabled={!isDirty || isSavingFile}
+                    className="px-3 py-1 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded text-xs transition"
+                  >
+                    {isSavingFile ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
               </div>
+              {fileError && (
+                <div className="px-4 py-2 bg-destructive/10 text-destructive text-sm border-b border-destructive/20">
+                  {fileError}
+                </div>
+              )}
               <div className="flex-1 overflow-hidden">
                 <Editor
                   height="100%"
                   language={selectedFile.language || getLanguageFromFile(selectedFile.name)}
-                  value={selectedFile.content}
+                  value={selectedFile.content || ''}
                   theme="vs-dark"
                   options={{
                     minimap: { enabled: false },
@@ -166,8 +249,9 @@ function WorkspaceContent() {
                     automaticLayout: true,
                   }}
                   onChange={(value) => {
-                    if (value && selectedFile) {
-                      setSelectedFile({ ...selectedFile, content: value });
+                    if (selectedFile) {
+                      setSelectedFile({ ...selectedFile, content: value || '' });
+                      setIsDirty(true);
                     }
                   }}
                 />
@@ -185,6 +269,11 @@ function WorkspaceContent() {
           <div className="px-4 py-3 border-b border-border">
             <h2 className="font-semibold text-foreground text-sm">AI Assistant</h2>
           </div>
+          {chatError && (
+            <div className="px-4 py-3 bg-destructive/10 text-destructive text-xs border-b border-destructive/20">
+              {chatError}
+            </div>
+          )}
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">

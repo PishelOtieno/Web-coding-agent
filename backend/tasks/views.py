@@ -20,9 +20,16 @@ class TaskViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'description']
 
     def get_queryset(self):
-        project_id = self.kwargs.get('project_id')
-        project = get_object_or_404(Project, id=project_id)
+        project = self.get_project()
         return Task.objects.filter(project=project)
+
+    def get_project(self):
+        project = get_object_or_404(Project, id=self.kwargs.get('project_id'))
+        user = self.request.user
+        if project.owner == user or project.collaborators.filter(user=user).exists():
+            return project
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied('You do not have access to this project.')
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -30,8 +37,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         return TaskSerializer
 
     def perform_create(self, serializer):
-        project_id = self.kwargs.get('project_id')
-        project = get_object_or_404(Project, id=project_id)
+        project = self.get_project()
         serializer.save(project=project)
 
     @action(detail=True, methods=['post'])

@@ -17,17 +17,24 @@ class FileViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         project_id = self.kwargs.get('project_id')
-        project = get_object_or_404(Project, id=project_id)
+        project = self.get_project()
         return File.objects.filter(project=project)
 
+    def get_project(self):
+        project = get_object_or_404(Project, id=self.kwargs.get('project_id'))
+        user = self.request.user
+        if project.owner == user or project.collaborators.filter(user=user).exists():
+            return project
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied('You do not have access to this project.')
+
     def get_serializer_class(self):
-        if self.action == 'retrieve':
+        if self.action in ['create', 'retrieve', 'update', 'partial_update']:
             return FileDetailSerializer
         return FileSerializer
 
     def perform_create(self, serializer):
-        project_id = self.kwargs.get('project_id')
-        project = get_object_or_404(Project, id=project_id)
+        project = self.get_project()
         serializer.save(project=project, created_by=self.request.user)
 
     def perform_update(self, serializer):
@@ -79,7 +86,7 @@ class FileViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def tree(self, request, project_id=None):
         """Get file tree structure."""
-        project = get_object_or_404(Project, id=project_id)
+        project = self.get_project()
         root_files = File.objects.filter(project=project, parent__isnull=True)
         serializer = FileSerializer(root_files, many=True)
         return Response(serializer.data)

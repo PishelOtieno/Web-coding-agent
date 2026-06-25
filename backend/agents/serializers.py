@@ -17,7 +17,7 @@ class AgentSerializer(serializers.ModelSerializer):
         model = Agent
         fields = ['id', 'project', 'project_name', 'name', 'model_name', 'current_stage', 
                  'temperature', 'max_tokens', 'is_active', 'capabilities', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'project', 'created_at', 'updated_at']
 
 
 class AgentDetailSerializer(AgentSerializer):
@@ -29,4 +29,4 @@ class AgentDetailSerializer(AgentSerializer):
         fields = ['id', 'project', 'project_name', 'name', 'model_name', 'system_prompt',
                  'current_stage', 'temperature', 'max_tokens', 'is_active', 'config', 
                  'capabilities', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'project', 'created_at', 'updated_at']

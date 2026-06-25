@@ -49,11 +49,13 @@ class ApiClient {
           if (this.refreshToken) {
             try {
               const response = await this.refreshTokens();
-              this.setTokens(response.data.access, response.data.refresh);
+              this.setTokens(response.data.access, response.data.refresh || this.refreshToken);
               return this.client(originalRequest);
             } catch (refreshError) {
               this.clearTokens();
-              window.location.href = '/login';
+              if (typeof window !== 'undefined') {
+                window.location.href = '/login';
+              }
               return Promise.reject(refreshError);
             }
           }
@@ -188,6 +190,11 @@ class ApiClient {
     return this.client.post(`/conversations/projects/${projectId}/conversations/${conversationId}/send_message/`, {
       content,
     });
+  }
+
+  async getMessages(projectId: number, conversationId: number) {
+    const response = await this.getConversation(projectId, conversationId);
+    return response.data.messages || [];
   }
 
   // Agents endpoints
